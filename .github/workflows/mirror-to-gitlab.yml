@@ -1,0 +1,56 @@
+name: Mirror to GitLab
+
+on:
+  push:
+  delete:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-github-to-gitlab
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar clave SSH del mirror
+        env:
+          MIRROR_SSH_KEY_B64: ${{ secrets.MIRROR_SSH_KEY_B64 }}
+        run: |
+          if [ -z "$MIRROR_SSH_KEY_B64" ]; then
+            echo "::error::Falta el secreto MIRROR_SSH_KEY_B64 en el repositorio de GitHub."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s' "$MIRROR_SSH_KEY_B64" | base64 -d > ~/.ssh/mirror_key
+          chmod 600 ~/.ssh/mirror_key
+          ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<'EOF'
+          Host gitlab.com
+            HostName gitlab.com
+            User git
+            IdentityFile ~/.ssh/mirror_key
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Traer todas las ramas y tags de GitHub
+        run: |
+          git fetch --prune --force origin \
+            '+refs/heads/*:refs/mirror/heads/*' \
+            '+refs/tags/*:refs/mirror/tags/*'
+
+      - name: Espejar a GitLab
+        run: |
+          git remote add gitlab git@gitlab.com:BENDER_5000/busq_git.git
+          git push --prune --force gitlab \
+            'refs/mirror/heads/*:refs/heads/*' \
+            'refs/mirror/tags/*:refs/tags/*'

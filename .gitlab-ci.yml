@@ -1,0 +1,32 @@
+stages:
+  - mirror
+
+mirror_to_github:
+  stage: mirror
+  image: alpine:3.20
+  variables:
+    GIT_DEPTH: "0"
+    GIT_STRATEGY: clone
+  before_script:
+    - apk add --no-cache git openssh-client
+    - test -n "$MIRROR_SSH_KEY_B64" || (echo "Falta la variable MIRROR_SSH_KEY_B64" && exit 1)
+    - mkdir -p ~/.ssh
+    - printf '%s' "$MIRROR_SSH_KEY_B64" | base64 -d > ~/.ssh/mirror_key
+    - chmod 600 ~/.ssh/mirror_key
+    - ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
+    - |
+      cat > ~/.ssh/config <<EOF
+      Host github.com
+        HostName github.com
+        User git
+        IdentityFile ~/.ssh/mirror_key
+        IdentitiesOnly yes
+      EOF
+    - chmod 600 ~/.ssh/config
+  script:
+    - git fetch --prune --force origin '+refs/heads/*:refs/mirror/heads/*' '+refs/tags/*:refs/mirror/tags/*'
+    - git remote add github git@github.com:BENDER35/busq_git.git
+    - git push --prune --force github 'refs/mirror/heads/*:refs/heads/*' 'refs/mirror/tags/*:refs/tags/*'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+  resource_group: mirror-gitlab-to-github
